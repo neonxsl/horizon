@@ -1,11 +1,19 @@
 name: ARM64 server build
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Horizon tag or commit to build (a nightly-source tag builds a tested release)
+        default: nightly-source/2026-10-30-1da354b
 jobs:
   build:
     runs-on: ubuntu-22.04-arm
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
+        with:
+          repository: horizon-rust/horizon
+          ref: ${{ inputs.ref }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Build the engine (server build) and horizon-server
