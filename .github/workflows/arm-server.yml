@@ -5,6 +5,9 @@ on:
       ref:
         description: Horizon tag or commit to build (a nightly-source tag builds a tested release)
         default: nightly-source/2026-10-30-1da354b
+      repository:
+        description: Where the ref is (horizon-rust/horizon, or this fork for its own branches)
+        default: horizon-rust/horizon
 jobs:
   build:
     runs-on: ubuntu-22.04-arm
@@ -12,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: horizon-rust/horizon
+          repository: ${{ inputs.repository }}
           ref: ${{ inputs.ref }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
