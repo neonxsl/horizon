@@ -978,12 +978,20 @@ impl Hub {
         let packet = match &self.sync.commands {
             Some(tree) => {
                 let dedicated = self.config.dedicated && !self.config.integrated;
-                tree.packet_with(
-                    g.permission,
-                    dedicated,
-                    &self.sync.builtin,
-                    &self.mod_commands.0,
-                )
+                // Horizon's auth adds its commands beside the mods' ones.
+                let extra = match self.lan.shared.config.auth {
+                    Some(_) => {
+                        let mut extra = crate::lan::auth::command_tree();
+                        if let Some(mods) = self.mod_commands.0["children"].as_object() {
+                            for (name, node) in mods {
+                                extra["children"][name] = node.clone();
+                            }
+                        }
+                        std::borrow::Cow::Owned(extra)
+                    }
+                    None => std::borrow::Cow::Borrowed(&self.mod_commands.0),
+                };
+                tree.packet_with(g.permission, dedicated, &self.sync.builtin, &extra)
             }
             None => play::Commands {
                 nodes: vec![play::CommandNode {

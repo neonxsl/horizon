@@ -233,6 +233,61 @@ impl Auth {
     }
 }
 
+/// The auth's commands in the command report's form (`commands.json`), added
+/// to the tree players get so their clients know and suggest them; the hub
+/// and `super::admin` answer them before the game's dispatcher sees them.
+pub fn command_tree() -> serde_json::Value {
+    use serde_json::{Map, Value, json};
+    // An argument per name, each the next one's parent; the last runs.
+    fn chain(names: &[&str]) -> Value {
+        let mut node = Value::Null;
+        for (i, name) in names.iter().enumerate().rev() {
+            let mut arg = json!({"type": "argument", "parser": "brigadier:string",
+                "properties": {"type": "word"}});
+            if i == names.len() - 1 {
+                arg["executable"] = json!(true);
+            } else {
+                let child = std::mem::take(&mut node);
+                arg["children"] = json!({names[i + 1]: child});
+            }
+            node = arg;
+        }
+        json!({"type": "literal", "children": {names[0]: node}})
+    }
+    let ops = json!({"type": "minecraft:require",
+        "permission": {"type": "minecraft:command_level", "level": "admins"}});
+    let literal = |children: Value| json!({"type": "literal", "children": children});
+    let mut root = Map::new();
+    for (name, args) in [
+        ("login", &["password"][..]),
+        ("l", &["password"][..]),
+        ("register", &["password", "confirm"][..]),
+        ("reg", &["password", "confirm"][..]),
+        ("changepassword", &["old", "new"][..]),
+    ] {
+        root.insert(name.into(), chain(args));
+    }
+    let mut reset = chain(&["name"]);
+    reset["permissions"] = ops.clone();
+    root.insert("authreset".into(), reset);
+    let mut allow = chain(&["name"]);
+    allow["children"]["name"]["children"] = json!({"off": {"type": "literal", "executable": true}});
+    allow["permissions"] = ops.clone();
+    root.insert("authallowcracked".into(), allow);
+    let flag = json!({"type": "literal", "executable": true});
+    let mut list = literal(json!({
+        "on": flag, "off": flag, "list": flag,
+        "add": chain(&["name"]), "remove": chain(&["name"]),
+    }));
+    list["permissions"] = ops.clone();
+    root.insert("n-whitelist".into(), list);
+    let mut proxy = literal(json!({"on": flag, "off": flag, "status": flag}));
+    proxy["executable"] = json!(true);
+    proxy["permissions"] = ops;
+    root.insert("proxy".into(), proxy);
+    json!({"type": "root", "children": root})
+}
+
 /// Seconds a cracked player has to log in.
 pub const LOGIN_SECONDS: u64 = 60;
 /// Wrong passwords before the kick.
@@ -473,6 +528,27 @@ impl Accounts {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_command_tree_has_the_auth_commands() {
+        let t = command_tree();
+        let reg = &t["children"]["register"]["children"]["password"];
+        assert_eq!(reg["parser"], "brigadier:string");
+        assert_eq!(reg["children"]["confirm"]["executable"], true);
+        assert_eq!(
+            t["children"]["login"]["children"]["password"]["executable"],
+            true
+        );
+        assert_eq!(
+            t["children"]["authreset"]["permissions"]["permission"]["level"],
+            "admins"
+        );
+        assert!(t["children"]["login"]["permissions"].is_null());
+        assert_eq!(
+            t["children"]["n-whitelist"]["children"]["on"]["executable"],
+            true
+        );
+    }
 
     #[test]
     fn modes_parse_and_refuse_typos() {
