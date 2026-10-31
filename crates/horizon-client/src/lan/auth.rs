@@ -253,6 +253,8 @@ pub struct Hold {
     pub attempts: u8,
     /// A password check runs on another thread.
     pub checking: bool,
+    /// Its client sent a move since the last tick: put it back this tick.
+    pub moved: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

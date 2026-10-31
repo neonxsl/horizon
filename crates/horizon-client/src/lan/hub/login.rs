@@ -6,7 +6,10 @@
 use super::Hub;
 use crate::lan::auth::{ATTEMPTS, Hold, LOGIN_SECONDS, Outcome};
 use crate::lan::guest::SPECTATOR;
-use horizon_protocol::{packets::play::Serverbound as S, text::literal};
+use horizon_protocol::{
+    packets::play::{self, Clientbound as C, Serverbound as S},
+    text::literal,
+};
 
 /// What a held player says, word by word.
 fn words(command: &str) -> Vec<&str> {
@@ -54,8 +57,22 @@ impl Hub {
             since: ticks,
             attempts: 0,
             checking: false,
+            moved: false,
         });
-        self.set_game_mode(conn, SPECTATOR);
+        // A spectator here, so nothing hurts it and mobs ignore it; its client
+        // is told adventure with no walking speed, so it keeps collisions
+        // (no flying through the ground to see what's under it) and stands.
+        g.game_mode = SPECTATOR;
+        g.flying = false;
+        g.send(&C::GameEvent(play::GameEvent {
+            event: super::game_event::CHANGE_GAME_MODE,
+            param: 2.0,
+        }));
+        g.send(&C::PlayerAbilities(play::PlayerAbilities {
+            flags: 1,
+            flying_speed: 0.0,
+            walking_speed: 0.0,
+        }));
         self.remind(conn);
     }
 
@@ -174,6 +191,13 @@ impl Hub {
         if !held {
             return true;
         }
+        if matches!(
+            packet,
+            S::MovePlayerPos(_) | S::MovePlayerPosRot(_) | S::MoveVehicle(_)
+        ) && let Some(h) = self.guest_mut(conn).and_then(|g| g.auth_hold.as_mut())
+        {
+            h.moved = true;
+        }
         matches!(
             packet,
             S::AcceptTeleportation(_)
@@ -247,6 +271,20 @@ impl Hub {
                 Outcome::ChangeWrong => self.tell(conn, "[Auth] Your old password is wrong."),
                 Outcome::Failed(why) => self.tell(conn, &format!("[Auth] That didn't work: {why}")),
             }
+        }
+        // Every tick, a held player whose client moved goes straight back.
+        let moved: Vec<(usize, [f64; 3])> = self
+            .guests
+            .iter_mut()
+            .enumerate()
+            .filter_map(|(i, g)| {
+                let h = g.auth_hold.as_mut().filter(|h| h.moved)?;
+                h.moved = false;
+                Some((i, h.position))
+            })
+            .collect();
+        for (i, position) in moved {
+            self.teleport(i, Some(position));
         }
         if !self.ticks.is_multiple_of(20) {
             return;
