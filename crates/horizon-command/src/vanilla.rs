@@ -541,7 +541,7 @@ fn apply_vanilla_order(d: &mut Dispatcher) {
 /// (SharedConstants.DEBUG_DEV_COMMANDS), plus Horizon's own commands when
 /// the server turned them on (`set_horizon_commands`).
 pub fn game_dispatcher() -> &'static Dispatcher {
-    game_tree(
+    game_tree_with(
         std::env::var_os("HORIZON_DEV_COMMANDS").is_some(),
         HORIZON_COMMANDS.load(std::sync::atomic::Ordering::Relaxed),
     )
@@ -550,26 +550,102 @@ pub fn game_dispatcher() -> &'static Dispatcher {
 /// by default, so `/help` and the command tree are vanilla's; a dedicated
 /// server turns them on with `horizon-pregen=true` in server.properties, the
 /// game with `--pregen` (docs/pregeneration.md).
-static HORIZON_COMMANDS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static HORIZON_COMMANDS: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+/// `/pregen`'s bit of HORIZON_COMMANDS.
+const PREGEN_COMMANDS: u8 = 1;
+/// The auth's bit (`/login`, `/register`... and the operators' ones).
+const AUTH_COMMANDS: u8 = 2;
+fn set_commands(bit: u8, on: bool) {
+    use std::sync::atomic::Ordering::Relaxed;
+    if on {
+        HORIZON_COMMANDS.fetch_or(bit, Relaxed);
+    } else {
+        HORIZON_COMMANDS.fetch_and(!bit, Relaxed);
+    }
+}
 /// Turns Horizon's own commands on or off for the trees `game_dispatcher`
 /// returns from now on.
 pub fn set_horizon_commands(on: bool) {
-    HORIZON_COMMANDS.store(on, std::sync::atomic::Ordering::Relaxed);
+    set_commands(PREGEN_COMMANDS, on);
+}
+/// Turns the auth's commands on or off (a dedicated server with
+/// `horizon-auth-mode`), so clients know them and suggest them.
+pub fn set_auth_commands(on: bool) {
+    set_commands(AUTH_COMMANDS, on);
 }
 /// The server.properties key that turns `/pregen` on (Horizon's own; vanilla
 /// ignores keys it doesn't know).
 pub const PREGEN_PROPERTY: &str = "horizon-pregen";
+#[cfg(test)]
 pub(crate) fn game_tree(dev: bool, horizon: bool) -> &'static Dispatcher {
-    static HORIZON: [std::sync::OnceLock<Dispatcher>; 2] =
-        [const { std::sync::OnceLock::new() }; 2];
-    match (dev, horizon) {
-        (true, false) => dispatcher(),
-        (false, false) => release_dispatcher(),
-        (dev, true) => HORIZON[usize::from(dev)].get_or_init(|| {
-            let mut d = build_with(dev);
-            horizon_commands(&mut d, 0);
-            d
-        }),
+    game_tree_with(dev, if horizon { PREGEN_COMMANDS } else { 0 })
+}
+fn game_tree_with(dev: bool, commands: u8) -> &'static Dispatcher {
+    static HORIZON: [std::sync::OnceLock<Dispatcher>; 8] =
+        [const { std::sync::OnceLock::new() }; 8];
+    match (dev, commands & 3) {
+        (true, 0) => dispatcher(),
+        (false, 0) => release_dispatcher(),
+        (dev, commands) => {
+            HORIZON[usize::from(commands) * 2 + usize::from(dev)].get_or_init(|| {
+                let mut d = build_with(dev);
+                if commands & PREGEN_COMMANDS != 0 {
+                    horizon_commands(&mut d, 0);
+                }
+                if commands & AUTH_COMMANDS != 0 {
+                    auth_commands(&mut d, 0);
+                }
+                d
+            })
+        }
+    }
+}
+/// The auth's commands (horizon-client's `lan::hub::login` and `lan::admin`
+/// answer them before the game's dispatcher would): a cracked player's, and
+/// the operators' (level 3).
+fn auth_commands(d: &mut Dispatcher, root: usize) {
+    let words = |d: &mut Dispatcher, at: usize, names: &[&str], id: &'static str| {
+        let mut node = at;
+        for name in names {
+            node = d.argument(node, name, ArgType::Word);
+        }
+        d.executes(node, id);
+    };
+    for (name, args, id) in [
+        ("login", &["password"][..], "auth.login"),
+        ("l", &["password"][..], "auth.login"),
+        ("register", &["password", "confirm"][..], "auth.register"),
+        ("reg", &["password", "confirm"][..], "auth.register"),
+        ("changepassword", &["old", "new"][..], "auth.changepassword"),
+    ] {
+        let node = d.literal(root, name);
+        words(d, node, args, id);
+    }
+    let reset = d.literal(root, "authreset");
+    d.requires(reset, 3);
+    words(d, reset, &["name"], "auth.reset");
+    let allow = d.literal(root, "authallowcracked");
+    d.requires(allow, 3);
+    let name = d.argument(allow, "name", ArgType::Word);
+    d.executes(name, "auth.allowcracked");
+    let undo = d.literal(name, "off");
+    d.executes(undo, "auth.allowcracked");
+    let list = d.literal(root, "n-whitelist");
+    d.requires(list, 3);
+    for word in ["on", "off", "list"] {
+        let w = d.literal(list, word);
+        d.executes(w, "auth.whitelist");
+    }
+    for word in ["add", "remove"] {
+        let w = d.literal(list, word);
+        words(d, w, &["name"], "auth.whitelist");
+    }
+    let proxy = d.literal(root, "proxy");
+    d.requires(proxy, 3);
+    d.executes(proxy, "auth.proxy");
+    for word in ["on", "off", "status"] {
+        let w = d.literal(proxy, word);
+        d.executes(w, "auth.proxy");
     }
 }
 /// Commands vanilla doesn't have, after its own: `/pregen`

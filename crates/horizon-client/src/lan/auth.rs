@@ -72,6 +72,12 @@ struct Store {
     /// them (`/authallowcracked`): a password for everyone using the name.
     #[serde(default)]
     allow_cracked: BTreeSet<String>,
+    /// `/n-whitelist`: names, not UUIDs, so one entry admits a name whether
+    /// it joins premium or cracked.
+    #[serde(default)]
+    whitelist_on: bool,
+    #[serde(default)]
+    whitelist: BTreeSet<String>,
 }
 
 pub struct Auth {
@@ -143,10 +149,10 @@ impl Auth {
                 return Ok(Self::of(seen));
             }
         }
-        let found = crate::server::profiles::lookup_by_name(
-            &crate::server::profiles::discovery_url(),
-            name,
-        )?;
+        // Mojang's API is slow now and then: one more try before refusing.
+        let discovery = crate::server::profiles::discovery_url();
+        let found = crate::server::profiles::lookup_by_name(&discovery, name)
+            .or_else(|_| crate::server::profiles::lookup_by_name(&discovery, name))?;
         let seen = Lookup {
             account: found.map(|p| format!("{:032x}", p.id)),
             checked: now(),
@@ -164,6 +170,53 @@ impl Auth {
         } else {
             Identity::Cracked
         }
+    }
+
+    /// The name whitelist refuses this name.
+    pub fn whitelist_refuses(&self, name: &str) -> bool {
+        let store = self.store.lock().unwrap();
+        store.whitelist_on && !store.whitelist.contains(&name.to_ascii_lowercase())
+    }
+
+    /// `/n-whitelist ...`: what to tell the one who ran it.
+    pub fn whitelist_command(&self, args: &[&str]) -> String {
+        let mut store = self.store.lock().unwrap();
+        let reply = match args {
+            ["on"] => {
+                store.whitelist_on = true;
+                "The name whitelist is on.".to_owned()
+            }
+            ["off"] => {
+                store.whitelist_on = false;
+                "The name whitelist is off.".to_owned()
+            }
+            ["add", name] => {
+                if store.whitelist.insert(name.to_ascii_lowercase()) {
+                    format!("Added {name} to the name whitelist.")
+                } else {
+                    format!("{name} is already on the name whitelist.")
+                }
+            }
+            ["remove", name] => {
+                if store.whitelist.remove(&name.to_ascii_lowercase()) {
+                    format!("Removed {name} from the name whitelist.")
+                } else {
+                    format!("{name} is not on the name whitelist.")
+                }
+            }
+            ["list"] => {
+                let names: Vec<&str> = store.whitelist.iter().map(String::as_str).collect();
+                format!(
+                    "The name whitelist is {} and has {} names: {}",
+                    if store.whitelist_on { "on" } else { "off" },
+                    names.len(),
+                    names.join(", ")
+                )
+            }
+            _ => return "/n-whitelist on | off | add <name> | remove <name> | list".to_owned(),
+        };
+        self.save(&store);
+        reply
     }
 
     /// `/authallowcracked NAME` (and its undo): whether a name an account

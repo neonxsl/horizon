@@ -259,6 +259,14 @@ pub(super) fn preflight(options: &mut Options) -> Result<bool> {
     {
         horizon_client::command::vanilla::set_horizon_commands(true);
     }
+    // The auth's commands, so players' clients know /login and /register.
+    if props
+        .raw
+        .get(horizon_client::lan::auth::MODE_PROPERTY)
+        .is_some_and(|v| !matches!(v.trim().to_ascii_lowercase().as_str(), "" | "off" | "false"))
+    {
+        horizon_client::command::vanilla::set_auth_commands(true);
+    }
     props.store(&settings)?;
     let eula_file = PathBuf::from("eula.txt");
     let agreed = match eula::agreed(&eula_file) {
@@ -758,6 +766,9 @@ impl Game<'_> {
             gate: Some(gate),
             online,
             auth,
+            proxy: Some(Arc::new(
+                horizon_client::lan::proxy::Proxy::from_properties(&props.raw.map)?,
+            )),
             log: Some(NetLog {
                 write: Arc::new(log_from),
                 lang: Arc::new(horizon_client::net::load_language(&self.options.resources)),
@@ -1065,6 +1076,17 @@ impl Game<'_> {
     /// everything else goes to the game's dispatcher.
     fn console_command(&mut self, state: &mut ServerState, line: &str) {
         let line = line.strip_prefix('/').unwrap_or(line);
+        // Horizon's auth and proxy commands (horizon_client::lan::admin).
+        if let Some(lines) = self
+            .lan
+            .as_ref()
+            .and_then(|h| horizon_client::lan::admin::run(&h.hub.lan.shared.config, line))
+        {
+            for l in lines {
+                self.console_reply(Text::literal(l));
+            }
+            return;
+        }
         let mut words = line.split_whitespace();
         let Some(command) = words.next() else {
             return;

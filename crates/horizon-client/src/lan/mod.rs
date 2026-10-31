@@ -4,6 +4,7 @@
 //! (`data`). The play state is driven by the game thread (`hub`), which only
 //! ever exchanges decoded packets with these threads through channels, so a
 //! world that is not open to the network pays nothing.
+pub mod admin;
 mod advancements;
 pub mod attributes;
 pub mod auth;
@@ -21,6 +22,7 @@ pub mod guest;
 pub mod hub;
 pub mod menu;
 pub mod playerdata;
+pub mod proxy;
 mod recipes;
 pub mod scoreboard;
 pub mod tracking;
@@ -171,6 +173,8 @@ pub struct NetConfig {
     /// Horizon's login modes (`horizon-auth-mode`): when set, they decide who
     /// is checked online instead of `online`.
     pub auth: Option<Arc<auth::Auth>>,
+    /// PROXY protocol v2 (`horizon-proxy-protocol`), a dedicated server's.
+    pub proxy: Option<Arc<proxy::Proxy>>,
     pub log: Option<NetLog>,
     /// server.properties `resource-pack`: offered to every player during
     /// configuration (a dedicated server's; MinecraftServer.getServerResourcePack).
@@ -205,6 +209,7 @@ impl NetConfig {
             gate: None,
             online: None,
             auth: None,
+            proxy: None,
             log: None,
             resource_pack: None,
             server_links: Vec::new(),
@@ -583,8 +588,24 @@ fn accept_loop(listener: TcpListener, shared: Arc<Shared>, stop: &AtomicBool) {
         }
     }
 }
-fn handle(stream: TcpStream, addr: SocketAddr, shared: Arc<Shared>) {
+fn handle(mut stream: TcpStream, addr: SocketAddr, shared: Arc<Shared>) {
     let _ = stream.set_nonblocking(false);
+    // PROXY protocol: the player's address from the tunnel's header.
+    let addr = match shared
+        .config
+        .proxy
+        .as_ref()
+        .map(|p| p.admit(&mut stream, addr))
+    {
+        None => addr,
+        Some(proxy::Verdict::Accept(player)) => player,
+        Some(proxy::Verdict::Refuse(why)) => {
+            if std::env::var_os("HORIZON_NET_DEBUG").is_some() {
+                log::warn!("[lan] {why}");
+            }
+            return;
+        }
+    };
     if let Err(e) = conn::serve(stream, addr, shared)
         && std::env::var_os("HORIZON_NET_DEBUG").is_some()
     {

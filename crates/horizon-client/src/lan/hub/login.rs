@@ -90,9 +90,27 @@ impl Hub {
         };
         let held = g.auth_hold.is_some();
         let (name, ip) = (g.name.clone(), g.address.ip());
+        // Operators' auth and proxy commands (crate::lan::admin).
+        if let Some(command) = command
+            && !held
+            && g.permission >= 3
+            && let Some(lines) = crate::lan::admin::run(&self.lan.shared.config, command)
+        {
+            for line in lines {
+                self.tell(conn, &line);
+            }
+            return false;
+        }
         if let Some(command) = command {
             let w = words(command);
             match w.first().map(|s| s.to_ascii_lowercase()).as_deref() {
+                Some("login" | "l" | "register" | "reg" | "changepassword") if !g.cracked => {
+                    self.tell(
+                        conn,
+                        "[Auth] You joined with your Minecraft account: no password needed.",
+                    );
+                    return false;
+                }
                 Some("changepassword") if g.cracked && !held => {
                     if let [_, old, new] = w[..] {
                         auth.accounts

@@ -721,6 +721,18 @@ fn serve_login(
     let online = match shared.config.auth.as_ref().filter(|_| !c.is_memory()) {
         // Horizon's login modes: the name decides whether this player is
         // checked online (super::auth).
+        // The name whitelist first: a name not on it never costs a Mojang lookup.
+        Some(auth) if auth.whitelist_refuses(&hello.name) => {
+            let text = refuse(
+                &mut c,
+                shared,
+                "Server thread",
+                &user,
+                &translatable("multiplayer.disconnect.not_whitelisted", &[]),
+            );
+            lost(shared, &user, &text);
+            return Ok(());
+        }
         Some(auth) => match auth.identity(&hello.name) {
             Ok(super::auth::Identity::Premium) => auth.online.as_ref(),
             Ok(super::auth::Identity::Cracked) => {
