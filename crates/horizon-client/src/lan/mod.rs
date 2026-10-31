@@ -72,6 +72,8 @@ pub struct Joined {
     /// Smoothed keep-alive round trip in milliseconds.
     pub latency: Arc<AtomicI32>,
     pub address: SocketAddr,
+    /// Joined cracked under Horizon's auth (`auth`): held until it logs in.
+    pub cracked: bool,
 }
 /// Queued for a connection's writer thread.
 pub enum Out {

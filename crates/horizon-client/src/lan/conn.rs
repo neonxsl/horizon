@@ -717,12 +717,16 @@ fn serve_login(
     // handleHello: online mode authenticates first; offline mode, and the
     // integrated server's own player through memory, derive the profile
     // from the name.
+    let mut cracked = false;
     let online = match shared.config.auth.as_ref().filter(|_| !c.is_memory()) {
         // Horizon's login modes: the name decides whether this player is
         // checked online (super::auth).
         Some(auth) => match auth.identity(&hello.name) {
             Ok(super::auth::Identity::Premium) => auth.online.as_ref(),
-            Ok(super::auth::Identity::Cracked) => None,
+            Ok(super::auth::Identity::Cracked) => {
+                cracked = true;
+                None
+            }
             Err(err) => {
                 if let Some(log) = &shared.config.log {
                     (log.write)(
@@ -767,7 +771,8 @@ fn serve_login(
     }
     let result = login_and_configure(&mut c, shared, uuid, &hello.name, properties);
     match result {
-        Ok(Some(parts)) => {
+        Ok(Some(mut parts)) => {
+            parts.cracked = cracked;
             play(c, shared, parts, address);
             Ok(())
         }
@@ -791,6 +796,8 @@ struct Parts {
     properties: Vec<login::Property>,
     info: ClientInformation,
     brand: String,
+    /// Joined cracked under Horizon's auth: must log in with a password.
+    cracked: bool,
 }
 
 fn login_and_configure(
@@ -963,6 +970,7 @@ fn login_and_configure(
         properties,
         info,
         brand,
+        cracked: false,
     }))
 }
 
@@ -1096,6 +1104,7 @@ fn play(c: Connection, shared: &Arc<Shared>, parts: Parts, address: std::net::So
         sender,
         latency,
         address,
+        cracked: parts.cracked,
     };
     let required_pack = shared
         .config

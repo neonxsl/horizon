@@ -244,6 +244,11 @@ pub struct Guest {
     pub death_time: u32,
     /// The join packets were sent (PlayerList.placeNewPlayer ran).
     pub placed: bool,
+    /// Horizon's auth: a cracked player not logged in yet, held as a
+    /// spectator where it joined (`super::auth::Hold`).
+    pub auth_hold: Option<super::auth::Hold>,
+    /// Joined cracked under Horizon's auth (it logs in with a password).
+    pub cracked: bool,
     /// The level the player is in (`ServerPlayer.level().dimension()`): the
     /// hub's level passes only reach the players in theirs.
     pub dimension: String,
@@ -376,6 +381,8 @@ impl Guest {
             dead: false,
             death_time: 0,
             placed: false,
+            auth_hold: None,
+            cracked: j.cracked,
             dimension: "minecraft:overworld".into(),
             menu: None,
             next_window: 0,
@@ -1007,6 +1014,7 @@ mod tests {
                 sender: PlayerSender::new(tx, Arc::new(std::sync::atomic::AtomicUsize::new(0))),
                 latency: Arc::new(AtomicI32::new(0)),
                 address: "127.0.0.1:1".parse().unwrap(),
+                cracked: false,
             },
             1,
             position,

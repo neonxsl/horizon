@@ -162,9 +162,14 @@ pub fn store(guest: &Guest, level: &mut Level, vehicle: Option<[i32; 4]>) {
     level.xp_total = guest.xp_total;
     level.xp_seed = guest.xp_seed;
     level.active_effects = guest.effects.saved();
-    level.game_mode = guest.game_mode;
-    level.creative = guest.game_mode == 1;
-    level.flying = guest.flying;
+    // A player who left before logging in keeps the mode it was held from.
+    let (game_mode, flying) = guest
+        .auth_hold
+        .as_ref()
+        .map_or((guest.game_mode, guest.flying), |h| (h.game_mode, h.flying));
+    level.game_mode = game_mode;
+    level.creative = game_mode == 1;
+    level.flying = flying;
     level.selected_slot = guest.selected as i32;
     level.spawn = guest.spawn.map(|s| [s[0] - 0.5, s[1], s[2] - 0.5]);
     level.respawn_elsewhere = guest.respawn_elsewhere.clone();
@@ -236,6 +241,7 @@ mod tests {
                 sender: PlayerSender::new(tx, Arc::default()),
                 latency: Arc::new(AtomicI32::new(0)),
                 address: "127.0.0.1:25565".parse().unwrap(),
+                cracked: false,
             },
             2,
             [0.0, 64.0, 0.0],

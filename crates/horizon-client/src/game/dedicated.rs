@@ -630,7 +630,7 @@ impl Game<'_> {
         let auth_mode = props
             .raw
             .get(horizon_client::lan::auth::MODE_PROPERTY)
-            .map(|v| horizon_client::lan::auth::Mode::parse(v))
+            .map(horizon_client::lan::auth::Mode::parse)
             .transpose()?
             .flatten();
         let auth = match auth_mode {
@@ -643,10 +643,16 @@ impl Game<'_> {
                     )?)),
                 };
                 log("INFO", &format!("Horizon auth: {mode:?} mode"));
+                let session_hours = props
+                    .raw
+                    .get(horizon_client::lan::auth::SESSION_PROPERTY)
+                    .and_then(|v| v.trim().parse().ok())
+                    .unwrap_or(24);
                 Some(Arc::new(horizon_client::lan::auth::Auth::load(
                     mode,
                     std::path::Path::new("auth"),
                     key,
+                    session_hours,
                 )))
             }
             None => None,

@@ -35,6 +35,7 @@ use std::sync::{Arc, atomic::Ordering};
 
 /// GameEvent types (ClientboundGameEventPacket).
 pub mod chat;
+mod login;
 
 pub mod game_event {
     pub const START_RAINING: u8 = 1;
@@ -1188,6 +1189,10 @@ impl Hub {
                     }
                 }
                 NetEvent::Packet(conn, packet, bytes) => {
+                    // Horizon's auth: a held player's packets stop here.
+                    if !self.auth_keeps(conn, &packet) {
+                        continue;
+                    }
                     let Some(g) = self.guest_mut(conn) else {
                         continue;
                     };
@@ -1227,6 +1232,7 @@ impl Hub {
                 }
             }
         }
+        self.auth_tick();
         // keepConnectionAlive's timeout, checked once a second here, not on
         // the writer thread: a client that stops reading blocks that thread
         // and would hold its slot forever. Kicked, it gets the reason; still
