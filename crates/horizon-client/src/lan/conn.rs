@@ -717,7 +717,33 @@ fn serve_login(
     // handleHello: online mode authenticates first; offline mode, and the
     // integrated server's own player through memory, derive the profile
     // from the name.
-    let online = shared.config.online.as_ref().filter(|_| !c.is_memory());
+    let online = match shared.config.auth.as_ref().filter(|_| !c.is_memory()) {
+        // Horizon's login modes: the name decides whether this player is
+        // checked online (super::auth).
+        Some(auth) => match auth.identity(&hello.name) {
+            Ok(super::auth::Identity::Premium) => auth.online.as_ref(),
+            Ok(super::auth::Identity::Cracked) => None,
+            Err(err) => {
+                if let Some(log) = &shared.config.log {
+                    (log.write)(
+                        "Server thread",
+                        "ERROR",
+                        &format!("Couldn't look up {} with Mojang: {err}", hello.name),
+                    );
+                }
+                let text = refuse(
+                    &mut c,
+                    shared,
+                    "Server thread",
+                    &user,
+                    &translatable("multiplayer.disconnect.authservers_down", &[]),
+                );
+                lost(shared, &user, &text);
+                return Ok(());
+            }
+        },
+        None => shared.config.online.as_ref().filter(|_| !c.is_memory()),
+    };
     let (uuid, properties) = match online {
         Some(online) => match authenticate(&mut c, shared, online, &hello.name, address, &user) {
             Ok(Ok(profile)) => profile,

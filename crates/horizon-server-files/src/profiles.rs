@@ -52,6 +52,31 @@ pub fn find_by_name(discovery: &str, name: &str) -> Option<NameAndId> {
     found(&agent.get(&url).call().ok()?.into_string().ok()?, name)
 }
 
+/// `find_by_name` that tells "no account has this name" (`Ok(None)`: the
+/// services answer 204 or 404) from "the services did not answer" (`Err`),
+/// for Horizon's auth, which must refuse rather than guess when Mojang is down.
+pub fn lookup_by_name(discovery: &str, name: &str) -> Result<Option<NameAndId>, String> {
+    let agent = ureq::AgentBuilder::new()
+        .timeout(Duration::from_secs(10))
+        .user_agent(&format!("Horizon/{}", horizon_core::release::VERSION))
+        .build();
+    let text = |r: ureq::Response| r.into_string().map_err(|e| e.to_string());
+    let doc = json::parse(
+        &text(agent.get(discovery).call().map_err(|e| e.to_string())?)?,
+        true,
+    )
+    .map_err(|_| "unreadable discovery document".to_owned())?;
+    let url = endpoint(&doc, "profiles", "getByName")
+        .ok_or("no getByName endpoint")?
+        .replace("{name}", &name.to_lowercase());
+    match agent.get(&url).call() {
+        Ok(r) if r.status() == 204 => Ok(None),
+        Ok(r) => Ok(found(&text(r)?, name)),
+        Err(ureq::Error::Status(404, _)) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 /// MinecraftServicesKeyInfo.get: the services' public keys from the
 /// discovery document's `authentication` / `getPublicKeys` endpoint. The
 /// profile-key keys (`playerCertificateKeys`, ServicesKeyType.PROFILE_KEY)

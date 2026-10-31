@@ -625,6 +625,32 @@ impl Game<'_> {
         } else {
             None
         };
+        // Horizon's login modes: premium and hybrid check players online with
+        // a key pair of their own, whatever online-mode says.
+        let auth_mode = props
+            .raw
+            .get(horizon_client::lan::auth::MODE_PROPERTY)
+            .map(|v| horizon_client::lan::auth::Mode::parse(v))
+            .transpose()?
+            .flatten();
+        let auth = match auth_mode {
+            Some(mode) => {
+                let key = match (mode, &online) {
+                    (horizon_client::lan::auth::Mode::Cracked, _) => None,
+                    (_, Some(online)) => Some(online.clone()),
+                    (_, None) => Some(Arc::new(OnlineMode::generate(
+                        props.prevent_proxy_connections,
+                    )?)),
+                };
+                log("INFO", &format!("Horizon auth: {mode:?} mode"));
+                Some(Arc::new(horizon_client::lan::auth::Auth::load(
+                    mode,
+                    std::path::Path::new("auth"),
+                    key,
+                )))
+            }
+            None => None,
+        };
         log(
             "INFO",
             &format!(
@@ -725,6 +751,7 @@ impl Game<'_> {
             })),
             gate: Some(gate),
             online,
+            auth,
             log: Some(NetLog {
                 write: Arc::new(log_from),
                 lang: Arc::new(horizon_client::net::load_language(&self.options.resources)),

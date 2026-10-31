@@ -6,6 +6,7 @@
 //! world that is not open to the network pays nothing.
 mod advancements;
 pub mod attributes;
+pub mod auth;
 pub mod border;
 pub mod chunks;
 mod command_order;
@@ -165,6 +166,9 @@ pub struct NetConfig {
     pub gate: Option<LoginGate>,
     /// Online mode: players are authenticated (a LAN world's when its host is signed in).
     pub online: Option<Arc<OnlineMode>>,
+    /// Horizon's login modes (`horizon-auth-mode`): when set, they decide who
+    /// is checked online instead of `online`.
+    pub auth: Option<Arc<auth::Auth>>,
     pub log: Option<NetLog>,
     /// server.properties `resource-pack`: offered to every player during
     /// configuration (a dedicated server's; MinecraftServer.getServerResourcePack).
@@ -198,6 +202,7 @@ impl NetConfig {
             bypasses_limit: None,
             gate: None,
             online: None,
+            auth: None,
             log: None,
             resource_pack: None,
             server_links: Vec::new(),
