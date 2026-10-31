@@ -19,6 +19,11 @@ jobs:
           ref: ${{ inputs.ref }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Auth and PROXY protocol tests (when the branch has them)
+        run: |
+          if [ -f crates/horizon-client/src/lan/auth.rs ]; then
+            cargo test --locked -p horizon-client --no-default-features --lib lan::
+          fi
       - name: Build the engine (server build) and horizon-server
         run: |
           cargo build --release --locked -p horizon-client --no-default-features --bin horizon-client
